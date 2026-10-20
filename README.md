@@ -69,6 +69,12 @@ Log messages are in Russian.
 | `CLAUDE_WAKE_PROMPT` | `qq` | text of the ping; any short message works, it only has to reach the model |
 | `CLAUDE_WAKE_MODEL` | `claude-haiku-5-5` | model for the ping; any model opens the window, the cheapest is enough |
 
+Both are optional: if unset, the defaults above are used. To override, add them to the cron line next to `HOME` and `PATH`:
+
+```cron
+* * * * * env HOME=$HOME PATH=$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin CLAUDE_WAKE_PROMPT=hi $HOME/.local/bin/cswap-wake >> $HOME/cswap-wake.log 2>&1
+```
+
 Constants at the top of the script:
 
 | Constant | Default | What it controls |
