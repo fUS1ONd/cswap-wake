@@ -1,0 +1,173 @@
+#!/usr/bin/env python3
+"""Открытие 5-часовых окон Claude Code по всем аккаунтам cswap.
+
+Крон дёргает скрипт каждую минуту, почти всегда он только читает состояние.
+У каждого аккаунта своё время следующего пинга (next). Когда оно наступает:
+  - окно 5h уже открыто (сам работал, автосвитч) — пинга нет, next = сброс + 1 мин;
+  - недельный лимит выбран — пинга нет, next = недельный сброс + 1 мин;
+  - иначе «Привет» через cswap run (активный аккаунт не меняется),
+    next = сейчас + 5 ч 1 мин.
+Аккаунты разнесены на 30 минут: новый встаёт в ближайший свободный слот,
+а если к сроку подошли сразу несколько, лишние сдвигаются по 30 минут.
+Аккаунты различаются по email + org, так что swap/move в cswap не путают.
+
+  claude-wake          тик (для крона)
+  claude-wake status   расписание
+"""
+import datetime as dt
+import fcntl
+import json
+import os
+import subprocess
+import sys
+
+STATE_DIR = os.path.expanduser("~/.local/state/claude-wake")
+STATE_FILE = os.path.join(STATE_DIR, "state.json")
+LOCK_FILE = os.path.join(STATE_DIR, "lock")
+
+CYCLE = dt.timedelta(hours=5, minutes=1)
+STEP = dt.timedelta(minutes=30)
+GRACE = dt.timedelta(minutes=1)
+RETRY = dt.timedelta(minutes=15)
+DISCOVERY = dt.timedelta(minutes=30)  # как часто искать новые аккаунты
+
+CLAUDE_ARGS = ["-p", os.environ.get("CLAUDE_WAKE_PROMPT", "Привет"),
+               "--model", os.environ.get("CLAUDE_WAKE_MODEL", "claude-haiku-5-5"),
+               "--effort", "low", "--allowedTools", "None"]
+
+
+def utcnow():
+    return dt.datetime.now(dt.timezone.utc).replace(microsecond=0)
+
+
+def parse(ts):
+    if not ts:
+        return None
+    return dt.datetime.fromisoformat(ts.replace("Z", "+00:00")).replace(microsecond=0)
+
+
+def log(msg):
+    print(f"[claude-wake {utcnow():%Y-%m-%d %H:%M} UTC] {msg}", flush=True)
+
+
+def load_state():
+    try:
+        with open(STATE_FILE) as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {"accounts": {}, "next_discovery": None}
+
+
+def save_state(state):
+    tmp = STATE_FILE + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(state, f, indent=1, ensure_ascii=False)
+    os.replace(tmp, STATE_FILE)
+
+
+def fetch_accounts():
+    out = subprocess.run(["cswap", "list", "--json"], capture_output=True,
+                         text=True, check=True).stdout
+    return {f'{a["email"]}|{a["organizationUuid"]}': a
+            for a in json.loads(out)["accounts"] if not a.get("disabled")}
+
+
+def free_slot(now, taken):
+    """Ближайшее время >= now, отстоящее от чужих next хотя бы на STEP."""
+    t = now
+    while any(abs(t - o) < STEP for o in taken):
+        t += STEP
+    return t
+
+
+def window_reset(acc, now):
+    """Когда пинговать без толку до: открытое окно 5h или выбранная неделя."""
+    usage = acc.get("usage") or {}
+    week = usage.get("sevenDay") or {}
+    week_reset = parse(week.get("resetsAt"))
+    if week.get("pct", 0) >= 100 and week_reset and week_reset > now:
+        return week_reset, "недельный лимит"
+    five_reset = parse((usage.get("fiveHour") or {}).get("resetsAt"))
+    if five_reset and five_reset > now:
+        return five_reset, "окно уже открыто"
+    return None, None
+
+
+def ping(num):
+    r = subprocess.run(["cswap", "run", str(num), "--", *CLAUDE_ARGS],
+                       capture_output=True, text=True, timeout=300)
+    reply = (r.stdout.strip().splitlines() or [""])[-1]
+    return r.returncode == 0, reply or r.stderr.strip()[-300:]
+
+
+def tick():
+    now = utcnow()
+    state = load_state()
+    sched = state["accounts"]
+    due = [k for k, s in sched.items() if parse(s["next"]) <= now]
+    disc = parse(state.get("next_discovery"))
+    if not due and disc and disc > now:
+        return
+
+    accounts = fetch_accounts()
+    for key in list(sched):
+        if key not in accounts:
+            log(f"{sched.pop(key)['email']} пропал из cswap — забыт")
+    for key, acc in accounts.items():
+        if key not in sched:
+            taken = [parse(s["next"]) for s in sched.values()]
+            sched[key] = {"email": acc["email"],
+                          "next": free_slot(now, taken).isoformat()}
+            log(f"новый аккаунт {acc['email']}, первый пинг {sched[key]['next']}")
+    state["next_discovery"] = (now + DISCOVERY).isoformat()
+
+    due = sorted((k for k, s in sched.items() if parse(s["next"]) <= now),
+                 key=lambda k: accounts[k]["number"])
+    pinged = False
+    for key in due:
+        acc, s = accounts[key], sched[key]
+        s["number"] = acc["number"]
+        reset, why = window_reset(acc, now)
+        if reset:
+            s["next"] = (reset + GRACE).isoformat()
+            log(f"Account-{acc['number']} {acc['email']}: {why}, следующий раз {s['next']}")
+        elif pinged:
+            # Сразу двоим не пишем: держим разнос по 30 минут
+            taken = [parse(o["next"]) for k, o in sched.items() if k != key]
+            s["next"] = free_slot(now + STEP, taken).isoformat()
+        else:
+            pinged = True
+            ok, reply = ping(acc["number"])
+            s["last_ping"] = now.isoformat()
+            s["last_ok"] = ok
+            s["next"] = (now + (CYCLE if ok else RETRY)).isoformat()
+            log(f"Account-{acc['number']} {acc['email']}: "
+                f"{'ok' if ok else 'ОШИБКА'} «{reply}», следующий раз {s['next']}")
+        save_state(state)
+    save_state(state)
+
+
+def status():
+    state = load_state()
+    rows = sorted(state["accounts"].values(), key=lambda s: s["next"])
+    for s in rows:
+        nxt = parse(s["next"]).astimezone(dt.timezone(dt.timedelta(hours=3)))
+        last = "ok" if s.get("last_ok") else ("ошибка" if "last_ok" in s else "—")
+        print(f"{nxt:%d.%m %H:%M} MSK  #{s.get('number', '?'):<3} {s['email']:<40} "
+              f"последний пинг: {s.get('last_ping', '—')} ({last})")
+
+
+def main():
+    os.makedirs(STATE_DIR, exist_ok=True)
+    if sys.argv[1:] == ["status"]:
+        return status()
+    with open(LOCK_FILE, "w") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return  # предыдущий тик ещё пингует
+        tick()
+
+
+if __name__ == "__main__":
+    main()
