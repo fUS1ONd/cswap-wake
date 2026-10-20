@@ -31,9 +31,12 @@ GRACE = dt.timedelta(minutes=1)
 RETRY = dt.timedelta(minutes=15)
 DISCOVERY = dt.timedelta(minutes=30)  # как часто искать новые аккаунты
 
-CLAUDE_ARGS = ["-p", os.environ.get("CLAUDE_WAKE_PROMPT", "Привет"),
+# Пустой контекст: без инструментов, MCP, скиллов и CLAUDE.md запрос весит
+# ~540 токенов вместо ~24 тыс., а окно открывает так же
+CLAUDE_ARGS = ["-p", os.environ.get("CLAUDE_WAKE_PROMPT", "qq"),
                "--model", os.environ.get("CLAUDE_WAKE_MODEL", "claude-haiku-5-5"),
-               "--effort", "low", "--allowedTools", "None"]
+               "--effort", "low", "--tools", "", "--system-prompt", "Reply with one word.",
+               "--strict-mcp-config", "--disable-slash-commands", "--setting-sources", ""]
 
 
 def utcnow():
