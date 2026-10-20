@@ -22,15 +22,23 @@ import os
 import subprocess
 import sys
 
+# Where the schedule is kept between runs (per-account next ping, last result)
 STATE_DIR = os.path.expanduser("~/.local/state/claude-wake")
 STATE_FILE = os.path.join(STATE_DIR, "state.json")
+# Held during a tick so two cron runs never ping at the same time
 LOCK_FILE = os.path.join(STATE_DIR, "lock")
 
+# Time from a successful ping to the next one: the window lasts 5 h, plus a minute
+# so we never hit an account just before its window resets
 CYCLE = dt.timedelta(hours=5, minutes=1)
+# Spacing between accounts, so their limits don't all reset at once
 STEP = dt.timedelta(minutes=30)
+# Margin after a window or weekly reset before pinging an account again
 GRACE = dt.timedelta(minutes=1)
+# Delay before retrying an account whose ping failed
 RETRY = dt.timedelta(minutes=15)
-DISCOVERY = dt.timedelta(minutes=30)  # how often to look for new accounts
+# How often to re-read cswap for added, removed or disabled accounts
+DISCOVERY = dt.timedelta(minutes=30)
 
 # Empty context: with no tools, MCP, skills or CLAUDE.md the request costs
 # ~540 tokens instead of ~24k and opens the window all the same

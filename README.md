@@ -66,10 +66,21 @@ Log messages are in Russian.
 
 | Variable | Default | |
 |---|---|---|
-| `CLAUDE_WAKE_PROMPT` | `qq` | message sent to open the window |
-| `CLAUDE_WAKE_MODEL` | `claude-haiku-5-5` | cheapest model is enough |
+| `CLAUDE_WAKE_PROMPT` | `qq` | text of the ping; any short message works, it only has to reach the model |
+| `CLAUDE_WAKE_MODEL` | `claude-haiku-5-5` | model for the ping; any model opens the window, the cheapest is enough |
 
-Timing constants (`CYCLE`, `STEP`, `RETRY`, `DISCOVERY`) are at the top of the script.
+Constants at the top of the script:
+
+| Constant | Default | What it controls |
+|---|---|---|
+| `CYCLE` | 5 h 1 min | time from a successful ping to the next one; the window lasts 5 h, the extra minute keeps the ping after the reset |
+| `STEP` | 30 min | spacing between accounts, so their limits don't all reset at once |
+| `GRACE` | 1 min | margin after a 5-hour or weekly reset before pinging the account |
+| `RETRY` | 15 min | delay before retrying a failed ping |
+| `DISCOVERY` | 30 min | how often to re-read cswap for added, removed or disabled accounts |
+| `STATE_DIR` | `~/.local/state/claude-wake` | where the schedule (`state.json`) and the lock file live |
+
+A new `STEP` applies to newly assigned slots; pings already in `state.json` keep their times, so the spacing evens out within one cycle. To re-plan from scratch, delete `state.json`.
 
 ## License
 
