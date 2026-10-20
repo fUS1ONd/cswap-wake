@@ -4,11 +4,11 @@
 
 Keep the 5-hour usage windows of **all** your Claude Code accounts started, on a staggered schedule, without touching the active one.
 
-Claude Code counts usage in 5-hour windows that start with your first message. If a window is already running when you sit down to work, it resets sooner, and you get a fresh limit sooner. `claude-wake` sends a tiny "qq" to every account managed by [claude-swap](https://github.com/realiti4/claude-swap) (`cswap`) as soon as its window has closed. Accounts are spaced 30 minutes apart, so their limits don't all reset at once.
+Claude Code counts usage in 5-hour windows that start with your first message. If a window is already running when you sit down to work, it resets sooner, and you get a fresh limit sooner. `cswap-wake` sends a tiny "qq" to every account managed by [claude-swap](https://github.com/realiti4/claude-swap) (`cswap`) as soon as its window has closed. Accounts are spaced 30 minutes apart, so their limits don't all reset at once.
 
 ## How it works
 
-Cron runs `claude-wake` every minute. Most ticks only read the state file and exit.
+Cron runs `cswap-wake` every minute. Most ticks only read the state file and exit.
 
 When an account's next ping is due:
 
@@ -23,7 +23,7 @@ When an account's next ping is due:
 - **Stable identity.** Accounts are keyed by email + organization, so `cswap swap` / `cswap move` don't confuse the schedule.
 - **Never switches your login.** Pings go through `cswap run`, which uses a separate session profile, so running Claude Code sessions stay on their account.
 - **One ping at a time.** If several accounts are due at once (say, after downtime), one gets pinged and the rest shift by 30 minutes.
-- **Survives restarts.** State lives in `~/.local/state/claude-wake/state.json`. A lock file prevents overlapping ticks.
+- **Survives restarts.** State lives in `~/.local/state/cswap-wake/state.json`. A lock file prevents overlapping ticks.
 
 ## Requirements
 
@@ -35,29 +35,29 @@ When an account's next ping is due:
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/fUS1ONd/cswap-wake/main/claude-wake -o ~/.local/bin/claude-wake
-chmod +x ~/.local/bin/claude-wake
+curl -fsSL https://raw.githubusercontent.com/fUS1ONd/cswap-wake/main/cswap-wake -o ~/.local/bin/cswap-wake
+chmod +x ~/.local/bin/cswap-wake
 ```
 
 Add to `crontab -e`. Cron has a minimal `PATH`, so pass the one where `claude` and `cswap` live:
 
 ```cron
-* * * * * env HOME=$HOME PATH=$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin $HOME/.local/bin/claude-wake >> $HOME/claude-wake.log 2>&1
+* * * * * env HOME=$HOME PATH=$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin $HOME/.local/bin/cswap-wake >> $HOME/cswap-wake.log 2>&1
 ```
 
 ## Usage
 
 ```bash
-claude-wake status   # schedule: who gets pinged next and when (MSK)
-claude-wake          # one tick, the same thing cron does
+cswap-wake status   # schedule: who gets pinged next and when (MSK)
+cswap-wake          # one tick, the same thing cron does
 ```
 
 Example log:
 
 ```
-[claude-wake 2026-10-20 09:01 UTC] new account a@example.com, first ping 2026-10-20T09:01:01+00:00
-[claude-wake 2026-10-20 09:01 UTC] Account-1 a@example.com: ok «Привет!», next 2026-10-20T14:02:01+00:00
-[claude-wake 2026-10-20 10:01 UTC] Account-3 c@example.com: window already open, next 2026-10-20T13:01:00+00:00
+[cswap-wake 2026-10-20 09:01 UTC] new account a@example.com, first ping 2026-10-20T09:01:01+00:00
+[cswap-wake 2026-10-20 09:01 UTC] Account-1 a@example.com: ok «Привет!», next 2026-10-20T14:02:01+00:00
+[cswap-wake 2026-10-20 10:01 UTC] Account-3 c@example.com: window already open, next 2026-10-20T13:01:00+00:00
 ```
 
 Log messages are in Russian.
@@ -78,7 +78,7 @@ Constants at the top of the script:
 | `GRACE` | 1 min | margin after a 5-hour or weekly reset before pinging the account |
 | `RETRY` | 15 min | delay before retrying a failed ping |
 | `DISCOVERY` | 30 min | how often to re-read cswap for added, removed or disabled accounts |
-| `STATE_DIR` | `~/.local/state/claude-wake` | where the schedule (`state.json`) and the lock file live |
+| `STATE_DIR` | `~/.local/state/cswap-wake` | where the schedule (`state.json`) and the lock file live |
 
 A new `STEP` applies to newly assigned slots; pings already in `state.json` keep their times, so the spacing evens out within one cycle. To re-plan from scratch, delete `state.json`.
 

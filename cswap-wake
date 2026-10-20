@@ -12,8 +12,8 @@ Accounts are spaced 30 minutes apart: a new one takes the nearest free slot,
 and if several are due at once, the extra ones shift by 30 minutes.
 Accounts are keyed by email + org, so cswap swap/move don't confuse them.
 
-  claude-wake          one tick (for cron)
-  claude-wake status   show the schedule
+  cswap-wake          one tick (for cron)
+  cswap-wake status   show the schedule
 """
 import datetime as dt
 import fcntl
@@ -23,7 +23,7 @@ import subprocess
 import sys
 
 # Where the schedule is kept between runs (per-account next ping, last result)
-STATE_DIR = os.path.expanduser("~/.local/state/claude-wake")
+STATE_DIR = os.path.expanduser("~/.local/state/cswap-wake")
 STATE_FILE = os.path.join(STATE_DIR, "state.json")
 # Held during a tick so two cron runs never ping at the same time
 LOCK_FILE = os.path.join(STATE_DIR, "lock")
@@ -59,7 +59,7 @@ def parse(ts):
 
 
 def log(msg):
-    print(f"[claude-wake {utcnow():%Y-%m-%d %H:%M} UTC] {msg}", flush=True)
+    print(f"[cswap-wake {utcnow():%Y-%m-%d %H:%M} UTC] {msg}", flush=True)
 
 
 def load_state():
