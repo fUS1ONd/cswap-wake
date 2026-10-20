@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
-"""Открытие 5-часовых окон Claude Code по всем аккаунтам cswap.
+"""Open the 5-hour Claude Code usage windows on every cswap account.
 
-Крон дёргает скрипт каждую минуту, почти всегда он только читает состояние.
-У каждого аккаунта своё время следующего пинга (next). Когда оно наступает:
-  - окно 5h уже открыто (сам работал, автосвитч) — пинга нет, next = сброс + 1 мин;
-  - недельный лимит выбран — пинга нет, next = недельный сброс + 1 мин;
-  - иначе «Привет» через cswap run (активный аккаунт не меняется),
-    next = сейчас + 5 ч 1 мин.
-Аккаунты разнесены на 30 минут: новый встаёт в ближайший свободный слот,
-а если к сроку подошли сразу несколько, лишние сдвигаются по 30 минут.
-Аккаунты различаются по email + org, так что swap/move в cswap не путают.
+Cron runs the script every minute; most ticks only read the state file.
+Each account has its own next ping time (next). When it comes:
+  - the 5h window is already open (manual use, auto-switch): no ping,
+    next = window reset + 1 min;
+  - the weekly limit is used up: no ping, next = weekly reset + 1 min;
+  - otherwise a short prompt via cswap run (the active account is untouched),
+    next = now + 5 h 1 min.
+Accounts are spaced 30 minutes apart: a new one takes the nearest free slot,
+and if several are due at once, the extra ones shift by 30 minutes.
+Accounts are keyed by email + org, so cswap swap/move don't confuse them.
 
-  claude-wake          тик (для крона)
-  claude-wake status   расписание
+  claude-wake          one tick (for cron)
+  claude-wake status   show the schedule
 """
 import datetime as dt
 import fcntl
@@ -29,10 +30,10 @@ CYCLE = dt.timedelta(hours=5, minutes=1)
 STEP = dt.timedelta(minutes=30)
 GRACE = dt.timedelta(minutes=1)
 RETRY = dt.timedelta(minutes=15)
-DISCOVERY = dt.timedelta(minutes=30)  # как часто искать новые аккаунты
+DISCOVERY = dt.timedelta(minutes=30)  # how often to look for new accounts
 
-# Пустой контекст: без инструментов, MCP, скиллов и CLAUDE.md запрос весит
-# ~540 токенов вместо ~24 тыс., а окно открывает так же
+# Empty context: with no tools, MCP, skills or CLAUDE.md the request costs
+# ~540 tokens instead of ~24k and opens the window all the same
 CLAUDE_ARGS = ["-p", os.environ.get("CLAUDE_WAKE_PROMPT", "qq"),
                "--model", os.environ.get("CLAUDE_WAKE_MODEL", "claude-haiku-5-5"),
                "--effort", "low", "--tools", "", "--system-prompt", "Reply with one word.",
@@ -76,7 +77,7 @@ def fetch_accounts():
 
 
 def free_slot(now, taken):
-    """Ближайшее время >= now, отстоящее от чужих next хотя бы на STEP."""
+    """Earliest time >= now that is at least STEP away from every other next."""
     t = now
     while any(abs(t - o) < STEP for o in taken):
         t += STEP
@@ -84,7 +85,7 @@ def free_slot(now, taken):
 
 
 def window_reset(acc, now):
-    """Когда пинговать без толку до: открытое окно 5h или выбранная неделя."""
+    """Until when a ping is pointless: an open 5h window or an exhausted week."""
     usage = acc.get("usage") or {}
     week = usage.get("sevenDay") or {}
     week_reset = parse(week.get("resetsAt"))
@@ -135,7 +136,7 @@ def tick():
             s["next"] = (reset + GRACE).isoformat()
             log(f"Account-{acc['number']} {acc['email']}: {why}, следующий раз {s['next']}")
         elif pinged:
-            # Сразу двоим не пишем: держим разнос по 30 минут
+            # Never ping two at once: keep the 30-minute spacing
             taken = [parse(o["next"]) for k, o in sched.items() if k != key]
             s["next"] = free_slot(now + STEP, taken).isoformat()
         else:
@@ -168,7 +169,7 @@ def main():
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            return  # предыдущий тик ещё пингует
+            return  # the previous tick is still pinging
         tick()
 
 
